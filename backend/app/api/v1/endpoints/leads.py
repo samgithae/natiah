@@ -3,10 +3,12 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.db.session import get_db
+from app.models.automation_job import AutomationJob
 from app.schemas.lead import LeadCreate, LeadOut
 from app.services.account_service import get_linkedin_account
 from app.services.automation_jobs import enqueue_automation_job
@@ -182,6 +184,37 @@ async def extract_search(
     await start_campaign(db, user.id, campaign.id)
 
     return ExtractSearchOut(campaign_id=campaign.id, automation_job_id=job.id, status="started")
+
+
+class AutomationJobStatusOut(BaseModel):
+    id: uuid.UUID
+    account_id: uuid.UUID
+    job_type: str
+    status: str
+    attempts: int
+    locked_by: str | None = None
+    last_error: str | None = None
+
+
+@router.get("/automation-jobs/{job_id}", response_model=AutomationJobStatusOut)
+async def get_automation_job_status(
+    job_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    res = await db.execute(select(AutomationJob).where(AutomationJob.id == job_id, AutomationJob.user_id == user.id))
+    job = res.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    return AutomationJobStatusOut(
+        id=job.id,
+        account_id=job.account_id,
+        job_type=job.job_type,
+        status=job.status,
+        attempts=int(job.attempts or 0),
+        locked_by=job.locked_by,
+        last_error=job.last_error,
+    )
 
 
 @router.post("/email-finder")

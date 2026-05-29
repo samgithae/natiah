@@ -22,6 +22,15 @@ type Lead = {
 
 type Account = { id: string; name: string };
 type LeadMode = "single" | "extract";
+type AutomationJobStatus = {
+  id: string;
+  account_id: string;
+  job_type: string;
+  status: string;
+  attempts: number;
+  locked_by: string | null;
+  last_error: string | null;
+};
 
 function parseCsv(text: string): Record<string, string>[] {
   const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
@@ -52,6 +61,7 @@ export default function LeadsPage() {
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const pageSize = 20;
+  const [activeExtractionJobId, setActiveExtractionJobId] = useState<string | null>(null);
 
   async function refresh() {
     setError(null);
@@ -80,6 +90,47 @@ export default function LeadsPage() {
     refresh();
   }, [accountId, page]);
 
+  useEffect(() => {
+    if (!activeExtractionJobId) return;
+
+    let stopped = false;
+    let ticks = 0;
+
+    const poll = async () => {
+      if (stopped) return;
+      ticks += 1;
+      try {
+        const st = await apiFetch<AutomationJobStatus>(
+          `/leads/automation-jobs/${encodeURIComponent(activeExtractionJobId)}`,
+        );
+        if (st.status === "failed") {
+          setActiveExtractionJobId(null);
+          toast.error("Extraction failed", st.last_error || "Unknown error");
+          return;
+        }
+        if (st.status === "done") {
+          setActiveExtractionJobId(null);
+          toast.success("Extraction finished");
+          await refresh();
+          return;
+        }
+        await refresh();
+      } catch (e) {
+        if (ticks >= 10) setActiveExtractionJobId(null);
+      }
+    };
+
+    const id = window.setInterval(() => {
+      poll().catch(() => {});
+    }, 4000);
+
+    poll().catch(() => {});
+    return () => {
+      stopped = true;
+      window.clearInterval(id);
+    };
+  }, [activeExtractionJobId]);
+
   async function onAdd(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -106,7 +157,7 @@ export default function LeadsPage() {
         .map((l) => l.trim())
         .filter((l) => l.length > 0);
 
-      await apiFetch<{ campaign_id: string; automation_job_id: string; status: string }>(
+      const res = await apiFetch<{ campaign_id: string; automation_job_id: string; status: string }>(
         "/leads/extract-search",
         {
           method: "POST",
@@ -122,6 +173,7 @@ export default function LeadsPage() {
       );
 
       toast.success("Extraction started", "Leads will appear as they’re found");
+      setActiveExtractionJobId(res.automation_job_id);
       setSearchUrl("");
       setConnectNote("");
       setMessage("");

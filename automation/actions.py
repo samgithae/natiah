@@ -17,8 +17,7 @@ async def ensure_logged_in(context: BrowserContext, timeout_ms: int = 5 * 60 * 1
         await random_mouse_jitter(page)
         await random_scroll(page)
         if "login" in (page.url or ""):
-            await page.goto("https://www.linkedin.com/login", wait_until="domcontentloaded")
-            await page.wait_for_url("**/feed/**", timeout=timeout_ms)
+            raise RuntimeError("LinkedIn login required for this account session")
         return True
     finally:
         await page.close()
