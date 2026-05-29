@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
+import traceback
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +12,7 @@ from urllib.parse import urlparse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import app.models  # noqa: F401
 from app.db.session import async_session_maker
 from app.models.app_settings import AppSettings
 from app.models.linkedin_account import LinkedInAccount
@@ -94,7 +97,11 @@ def _is_blacklisted(*, payload: dict, settings: AppSettings | None) -> bool:
 
 async def run_once(context_cache: dict[str, object]) -> bool:
     async with async_session_maker() as db:
-        job = await fetch_and_lock_next_job(db)
+        try:
+            job = await fetch_and_lock_next_job(db)
+        except Exception:
+            logging.getLogger("natiah").exception("Failed to fetch/lock next automation job")
+            return True
         if not job:
             return False
 
@@ -206,14 +213,16 @@ async def run_once(context_cache: dict[str, object]) -> bool:
             await mark_job_done(db, job.id)
             return True
         except CaptchaDetectedError as e:
+            logging.getLogger("natiah").exception("Automation job failed (captcha): %s", str(job.id))
             manager = AntiDetectionManager()
             await manager.record_failure(db, job.account_id, captcha=True)
-            await mark_job_failed(db, job.id, f"{type(e).__name__}: {e}")
+            await mark_job_failed(db, job.id, traceback.format_exc())
             return True
         except Exception as e:
+            logging.getLogger("natiah").exception("Automation job failed: %s", str(job.id))
             manager = AntiDetectionManager()
             await manager.record_failure(db, job.account_id, captcha=False)
-            await mark_job_failed(db, job.id, f"{type(e).__name__}: {e}")
+            await mark_job_failed(db, job.id, traceback.format_exc())
             return True
 
 

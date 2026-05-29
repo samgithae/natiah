@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import and_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import app.models  # noqa: F401
 from app.models.automation_job import AutomationJob
 from app.models.linkedin_account import LinkedInAccount
 from app.models.user import User

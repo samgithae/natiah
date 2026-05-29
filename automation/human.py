@@ -22,7 +22,7 @@ async def random_scroll(page: Page, min_steps: int = 1, max_steps: int = 3) -> N
 
 async def random_mouse_jitter(page: Page, moves: int | None = None) -> None:
     moves = moves if moves is not None else random.randint(3, 8)
-    box = await page.viewport_size()
+    box = page.viewport_size
     if not box:
         return
     w, h = box["width"], box["height"]
@@ -34,4 +34,3 @@ async def random_mouse_jitter(page: Page, moves: int | None = None) -> None:
         await page.mouse.move(x2, y2, steps=random.randint(5, 18))
         human_delay(0.05, 0.25)
         x, y = x2, y2
-
