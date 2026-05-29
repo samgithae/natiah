@@ -105,7 +105,16 @@ export default function LeadsPage() {
         );
         if (st.status === "failed") {
           setActiveExtractionJobId(null);
-          toast.error("Extraction failed", st.last_error || "Unknown error");
+          const raw = st.last_error || "Unknown error";
+          const cleaned =
+            raw.includes("LinkedIn login required for this account session") ||
+            raw.includes("LinkedIn requires sign-in") ||
+            raw.includes("LinkedIn is not accessible (login/checkpoint)")
+              ? "LinkedIn session not connected. Go to Accounts → Connect LinkedIn and paste your li_at cookie, then retry extraction."
+              : raw.startsWith("Traceback") && raw.includes("LinkedIn login required")
+                ? "LinkedIn session not connected. Go to Accounts → Connect LinkedIn and paste your li_at cookie, then retry extraction."
+                : raw;
+          toast.error("Extraction failed", cleaned);
           return;
         }
         if (st.status === "done") {
