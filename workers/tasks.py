@@ -21,6 +21,17 @@ from app.services.mautic import bulk_sync
 from app.services.sequence_engine import dispatch_due_actions, enroll_lead_in_campaign, schedule_sequence_actions
 
 
+_worker_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _run(coro):
+    global _worker_loop
+    if _worker_loop is None or _worker_loop.is_closed():
+        _worker_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(_worker_loop)
+    return _worker_loop.run_until_complete(coro)
+
+
 async def _with_db(fn):
     async with async_session_maker() as db:
         return await fn(db)
@@ -45,7 +56,7 @@ def scrape_sales_navigator(linkedin_account_id: str, user_id_hex: str, search_ur
         )
         return {"status": "queued", "automation_job_id": str(job.id)}
 
-    return asyncio.run(_with_db(run))
+    return _run(_with_db(run))
 
 
 @shared_task(name="workers.tasks.find_emails")
@@ -79,7 +90,7 @@ def find_emails(user_id_hex: str, lead_ids: list[str]):
                 await db.commit()
         return {"updated": updated, "failed": failed}
 
-    return asyncio.run(_with_db(run))
+    return _run(_with_db(run))
 
 
 @shared_task(name="workers.tasks.clean_leads")
@@ -116,7 +127,7 @@ def clean_leads(user_id_hex: str, lead_ids: list[str]):
             await db.commit()
             raise
 
-    return asyncio.run(_with_db(run))
+    return _run(_with_db(run))
 
 
 @shared_task(name="workers.tasks.sync_mautic")
@@ -149,7 +160,7 @@ def sync_mautic(user_id_hex: str, lead_ids: list[str], tags: list[str] | None = 
         await db.commit()
         return {"provider": "mautic", "ok": result["ok"], "failed": result["failed"]}
 
-    return asyncio.run(_with_db(run))
+    return _run(_with_db(run))
 
 
 @shared_task(name="workers.tasks.run_campaign")
@@ -172,7 +183,7 @@ def run_campaign(campaign_id: str, user_id: str):
             created += await schedule_sequence_actions(db, enrollment=enr)
         return {"actions_scheduled": created}
 
-    return asyncio.run(_with_db(run))
+    return _run(_with_db(run))
 
 
 @shared_task(name="workers.tasks.scheduled_tick")
@@ -206,7 +217,7 @@ def scheduled_tick():
         dispatched = await dispatch_due_actions(db, limit=200)
         return {"dispatched": dispatched, "actions_scheduled": total_scheduled}
 
-    return asyncio.run(_with_db(run))
+    return _run(_with_db(run))
 
 
 @shared_task(
@@ -305,4 +316,4 @@ def execute_sequence_action(sequence_action_id: str):
             await db.commit()
             raise
 
-    return asyncio.run(_with_db(run))
+    return _run(_with_db(run))

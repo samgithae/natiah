@@ -7,6 +7,8 @@ from sqlalchemy import and_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.automation_job import AutomationJob
+from app.models.linkedin_account import LinkedInAccount
+from app.models.user import User
 
 
 def worker_id() -> str:
