@@ -177,12 +177,19 @@ async def run_once(context_cache: dict[str, object]) -> bool:
             elif job_type == "MONITOR_INBOX":
                 await monitor_inbox(ctx)
             elif job_type == "SCRAPE_SALES_NAVIGATOR":
-                await scrape_sales_navigator(
-                    context=ctx,
-                    db=db,
-                    account_id=job.account_id,
-                    search_url=payload["search_url"],
-                    limit=int(payload.get("limit") or 50),
+                try:
+                    scrape_timeout_s = float(os.environ.get("NATIAH_SCRAPE_TIMEOUT_S") or "240")
+                except Exception:
+                    scrape_timeout_s = 240.0
+                await asyncio.wait_for(
+                    scrape_sales_navigator(
+                        context=ctx,
+                        db=db,
+                        account_id=job.account_id,
+                        search_url=payload["search_url"],
+                        limit=int(payload.get("limit") or 50),
+                    ),
+                    timeout=scrape_timeout_s,
                 )
             else:
                 raise RuntimeError(f"Unknown job_type: {job_type}")

@@ -190,9 +190,20 @@ class SalesNavigatorScraper:
             await self._maybe_accept_cookies(page)
             if await detect_captcha(page):
                 raise CaptchaDetectedError("Captcha detected on search page")
+            try:
+                text = await page.inner_text("body")
+            except Exception:
+                text = ""
+            low = (text or "").lower()
+            if "sign in" in low and "linkedin" in low and "/in/" not in (page.url or ""):
+                raise RuntimeError("LinkedIn requires sign-in to view search results. Reconnect the account session.")
             url = (page.url or "").lower()
             if "login" in url or "/checkpoint/" in url or "challenge" in url:
                 raise RuntimeError("LinkedIn is not accessible (login/checkpoint). Reconnect the account session.")
+            try:
+                await page.wait_for_selector("a[href*='/in/'], a[href*='linkedin.com/in/']", timeout=12_000)
+            except Exception:
+                pass
             await random_mouse_jitter(page)
 
             seen: set[str] = set()
