@@ -1,0 +1,53 @@
+services:
+  postgres:
+    ports: []
+    restart: unless-stopped
+
+  redis:
+    ports: []
+    restart: unless-stopped
+
+  backend:
+    environment:
+      DB_AUTO_CREATE: "false"
+    volumes:
+      - natiah_profiles:/app/automation/profiles
+    ports:
+      - "127.0.0.1:8000:8000"
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    restart: unless-stopped
+
+  worker:
+    environment:
+      DB_AUTO_CREATE: "false"
+      PLAYWRIGHT_HEADLESS: "true"
+    volumes:
+      - natiah_profiles:/app/automation/profiles
+    restart: unless-stopped
+
+  beat:
+    environment:
+      DB_AUTO_CREATE: "false"
+    volumes:
+      - natiah_profiles:/app/automation/profiles
+    restart: unless-stopped
+
+  automation_runner:
+    environment:
+      DB_AUTO_CREATE: "false"
+      PLAYWRIGHT_HEADLESS: "true"
+    volumes:
+      - natiah_profiles:/app/automation/profiles
+    restart: unless-stopped
+
+  migrate:
+    environment:
+      DB_AUTO_CREATE: "false"
+    volumes: []
+
+  frontend:
+    volumes: []
+    ports:
+      - "127.0.0.1:3000:3000"
+    command: ["npm", "run", "start", "--", "-p", "3000"]
+    restart: unless-stopped

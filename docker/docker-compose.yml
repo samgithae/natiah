@@ -1,0 +1,132 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-natiah}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-natiah}
+      POSTGRES_DB: ${POSTGRES_DB:-natiah}
+    ports:
+      - "5432:5432"
+    volumes:
+      - natiah_postgres:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/backend.Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://natiah:natiah@postgres:5432/natiah}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      JWT_SECRET: ${JWT_SECRET:-change-me}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      DB_AUTO_CREATE: ${DB_AUTO_CREATE:-true}
+      LINKEDIN_CLIENT_ID: ${LINKEDIN_CLIENT_ID:-}
+      LINKEDIN_CLIENT_SECRET: ${LINKEDIN_CLIENT_SECRET:-}
+      LINKEDIN_CALLBACK_URL: ${LINKEDIN_CALLBACK_URL:-http://localhost:8000/api/v1/accounts/{account_id}/oauth/callback}
+      LINKEDIN_SCOPES: ${LINKEDIN_SCOPES:-openid profile email w_member_social}
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ../backend:/app/backend
+      - ../automation:/app/automation
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/worker.Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://natiah:natiah@postgres:5432/natiah}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      JWT_SECRET: ${JWT_SECRET:-change-me}
+      DB_AUTO_CREATE: ${DB_AUTO_CREATE:-true}
+      PLAYWRIGHT_HEADLESS: ${PLAYWRIGHT_HEADLESS:-true}
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ../backend:/app/backend
+      - ../workers:/app/workers
+      - ../automation:/app/automation
+
+  beat:
+    build:
+      context: ..
+      dockerfile: docker/worker.Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://natiah:natiah@postgres:5432/natiah}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      JWT_SECRET: ${JWT_SECRET:-change-me}
+      DB_AUTO_CREATE: ${DB_AUTO_CREATE:-true}
+    command: ["celery", "-A", "workers.celery_app.celery_app", "beat", "-l", "INFO"]
+    depends_on:
+      - redis
+    volumes:
+      - ../backend:/app/backend
+      - ../workers:/app/workers
+      - ../automation:/app/automation
+
+  automation_runner:
+    build:
+      context: ..
+      dockerfile: docker/worker.Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://natiah:natiah@postgres:5432/natiah}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      JWT_SECRET: ${JWT_SECRET:-change-me}
+      DB_AUTO_CREATE: ${DB_AUTO_CREATE:-true}
+      PLAYWRIGHT_HEADLESS: ${PLAYWRIGHT_HEADLESS:-true}
+    command: ["python", "-m", "automation.runner"]
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ../backend:/app/backend
+      - ../workers:/app/workers
+      - ../automation:/app/automation
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: docker/backend.Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://natiah:natiah@postgres:5432/natiah}
+    depends_on:
+      - postgres
+    command: ["alembic", "-c", "backend/alembic.ini", "upgrade", "head"]
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/frontend.Dockerfile
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY-}
+        HTTP_PROXY: ${HTTP_PROXY-}
+        HTTPS_PROXY: ${HTTPS_PROXY-}
+        NO_PROXY: ${NO_PROXY-}
+        http_proxy: ${http_proxy-}
+        https_proxy: ${https_proxy-}
+        no_proxy: ${no_proxy-}
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    volumes:
+      - ../frontend:/app
+      - /app/node_modules
+      - /app/.next
+    command: ["npm", "run", "dev", "--", "-p", "3000", "-H", "0.0.0.0"]
+
+volumes:
+  natiah_postgres:
+  natiah_profiles:
