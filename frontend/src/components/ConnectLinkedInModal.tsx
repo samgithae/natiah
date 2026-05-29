@@ -7,6 +7,7 @@ import { Button } from "@/components/ui";
 import { apiFetch } from "@/lib/api";
 
 type OAuthInitiateResult = { connect_url: string };
+type CookieConnectLinkResult = { url: string };
 
 export function ConnectLinkedInModal({
   open,
@@ -21,29 +22,30 @@ export function ConnectLinkedInModal({
 }) {
   const toast = useToast();
   const [loading, setLoading] = useState(false);
+  const [cookieConnectUrl, setCookieConnectUrl] = useState<string | null>(null);
   const [connectUrl, setConnectUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open || !accountId) return;
     setError(null);
+    setCookieConnectUrl(null);
     setConnectUrl(null);
     setLoading(true);
 
-    apiFetch<OAuthInitiateResult>(`/accounts/${accountId}/oauth/init`, { method: "POST" })
-      .then(({ connect_url }) => setConnectUrl(connect_url))
+    apiFetch<CookieConnectLinkResult>(`/accounts/${accountId}/connect-link`, { method: "POST" })
+      .then(({ url }) => setCookieConnectUrl(url))
       .catch((e) => {
         const msg = e instanceof Error ? e.message : "Failed";
-        if (msg.includes("not configured") || msg.includes("OAuth not configured")) {
-          setError(
-            "LinkedIn OAuth is not configured. Set LINKEDIN_CLIENT_ID and LINKEDIN_CLIENT_SECRET in your environment.",
-          );
-        } else {
-          setError(msg);
-        }
-        toast.error("OAuth init failed", msg);
+        setError(msg);
+        toast.error("Connect link failed", msg);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        apiFetch<OAuthInitiateResult>(`/accounts/${accountId}/oauth/init`, { method: "POST" })
+          .then(({ connect_url }) => setConnectUrl(connect_url))
+          .catch(() => {})
+          .finally(() => setLoading(false));
+      });
   }, [open, accountId]);
 
   if (!open || !accountId) return null;
@@ -53,7 +55,7 @@ export function ConnectLinkedInModal({
       <div className="w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-xl">
         <div className="text-lg font-semibold">Connect LinkedIn</div>
         <div className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-          Click the button below to open a LinkedIn authorization popup. You&apos;ll log in to LinkedIn and grant Natiah access to your account.
+          Use the Automation connect method to enable lead extraction, connection requests, and messages.
         </div>
 
         {error ? (
@@ -64,7 +66,7 @@ export function ConnectLinkedInModal({
           </div>
         ) : null}
 
-        {loading ? <div className="mt-4 text-sm text-zinc-500">Preparing authorization...</div> : null}
+        {loading ? <div className="mt-4 text-sm text-zinc-500">Preparing connect links...</div> : null}
 
         <div className="mt-6 flex items-center justify-end gap-2">
           <Button variant="secondary" disabled={loading} onClick={onClose}>
@@ -72,8 +74,20 @@ export function ConnectLinkedInModal({
           </Button>
           {connectUrl ? (
             <a href={connectUrl} target="_blank" rel="noreferrer">
-              <Button onClick={() => setTimeout(() => { onDone(); onClose(); }, 1000)}>
-                Open LinkedIn Authorization
+              <Button variant="secondary">OAuth (optional)</Button>
+            </a>
+          ) : null}
+          {cookieConnectUrl ? (
+            <a href={cookieConnectUrl} target="_blank" rel="noreferrer">
+              <Button
+                onClick={() =>
+                  setTimeout(() => {
+                    onDone();
+                    onClose();
+                  }, 1000)
+                }
+              >
+                Connect for Automation
               </Button>
             </a>
           ) : null}
