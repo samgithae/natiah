@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 import { Shell } from "@/components/Shell";
 import { useToast } from "@/components/Toaster";
-import { Button, Card, Input, Pagination, Select } from "@/components/ui";
+import { Button, Card, Input, Pagination, Select, Textarea } from "@/components/ui";
 import { apiFetch } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 
@@ -21,6 +21,7 @@ type Lead = {
 };
 
 type Account = { id: string; name: string };
+type LeadMode = "single" | "extract";
 
 function parseCsv(text: string): Record<string, string>[] {
   const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
@@ -41,7 +42,12 @@ export default function LeadsPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [accountId, setAccountId] = useState<string>("");
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [mode, setMode] = useState<LeadMode>("single");
   const [linkedinUrl, setLinkedinUrl] = useState("");
+  const [searchUrl, setSearchUrl] = useState("");
+  const [connectNote, setConnectNote] = useState("");
+  const [message, setMessage] = useState("");
+  const [followups, setFollowups] = useState("");
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
@@ -79,18 +85,51 @@ export default function LeadsPage() {
     setError(null);
     try {
       if (!accountId) throw new Error("Select an account");
-      await apiFetch<Lead>("/leads", {
-        method: "POST",
-        body: JSON.stringify({ account_id: accountId, linkedin_url: linkedinUrl }),
-      });
-      toast.success("Lead saved");
-      setLinkedinUrl("");
-      setPage(1);
-      await refresh();
+      if (mode === "single") {
+        await apiFetch<Lead>("/leads", {
+          method: "POST",
+          body: JSON.stringify({ account_id: accountId, linkedin_url: linkedinUrl }),
+        });
+        toast.success("Lead saved");
+        setLinkedinUrl("");
+        setPage(1);
+        await refresh();
+        return;
+      }
+
+      const url = (searchUrl || "").trim();
+      if (!url) throw new Error("Enter a LinkedIn search URL");
+      if (!url.includes("linkedin.com/")) throw new Error("Enter a valid LinkedIn URL");
+
+      const followupList = followups
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0);
+
+      await apiFetch<{ campaign_id: string; automation_job_id: string; status: string }>(
+        "/leads/extract-search",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            account_id: accountId,
+            search_url: url,
+            connect_note: connectNote.trim() || null,
+            message: message.trim() || null,
+            followups: followupList,
+            lead_limit: 50,
+          }),
+        },
+      );
+
+      toast.success("Extraction started", "Leads will appear as they’re found");
+      setSearchUrl("");
+      setConnectNote("");
+      setMessage("");
+      setFollowups("");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed";
       setError(msg);
-      toast.error("Failed to save lead", msg);
+      toast.error(mode === "single" ? "Failed to save lead" : "Failed to start extraction", msg);
     }
   }
 
@@ -213,8 +252,23 @@ export default function LeadsPage() {
 
       <div className="mt-6 grid gap-6 lg:grid-cols-5">
         <div className="lg:col-span-2">
-          <Card title="Add lead">
+          <Card title={mode === "single" ? "Add lead" : "Extract a Search"}>
             <form onSubmit={onAdd} className="space-y-4">
+              <div>
+                <div className="text-sm font-medium">Mode</div>
+                <div className="mt-1">
+                  <Select
+                    value={mode}
+                    onChange={(v) => setMode(v as LeadMode)}
+                    options={[
+                      { value: "single", label: "Add single profile" },
+                      { value: "extract", label: "Extract a Search" },
+                    ]}
+                  />
+                </div>
+              </div>
+
+              {mode === "single" ? (
               <div>
                 <div className="text-sm font-medium">LinkedIn URL</div>
                 <div className="mt-1">
@@ -225,7 +279,54 @@ export default function LeadsPage() {
                   />
                 </div>
               </div>
-              <Button type="submit">Save</Button>
+              ) : (
+                <>
+                  <div>
+                    <div className="text-sm font-medium">LinkedIn Search URL</div>
+                    <div className="mt-1">
+                      <Input
+                        value={searchUrl}
+                        onChange={setSearchUrl}
+                        placeholder="https://www.linkedin.com/search/results/people/?keywords=..."
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium">Connection note (optional)</div>
+                    <div className="mt-1">
+                      <Textarea
+                        value={connectNote}
+                        onChange={setConnectNote}
+                        rows={3}
+                        placeholder="Short note to include with the connection request (optional)"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium">First message (optional)</div>
+                    <div className="mt-1">
+                      <Textarea
+                        value={message}
+                        onChange={setMessage}
+                        rows={5}
+                        placeholder="Message sent after connecting (optional)"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium">Follow-up messages (optional)</div>
+                    <div className="mt-1">
+                      <Textarea
+                        value={followups}
+                        onChange={setFollowups}
+                        rows={6}
+                        placeholder={"One follow-up per line"}
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
+              <Button type="submit">{mode === "single" ? "Save" : "Start extraction"}</Button>
             </form>
           </Card>
         </div>

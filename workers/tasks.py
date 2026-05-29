@@ -27,25 +27,23 @@ async def _with_db(fn):
 
 
 @shared_task(name="workers.tasks.scrape_sales_navigator")
-def scrape_sales_navigator(linkedin_account_id: str, user_id_hex: str, search_url: str):
+def scrape_sales_navigator(linkedin_account_id: str, user_id_hex: str, search_url: str, limit: int = 50):
     try:
         account_id = uuid.UUID(linkedin_account_id)
     except ValueError:
         account_id = uuid.UUID(hex=linkedin_account_id)
 
+    user_id = uuid.UUID(hex=user_id_hex)
+
     async def run(db: AsyncSession):
-        payload = {
-            "account_id": account_id,
-            "linkedin_url": f"{search_url}#seed",
-            "first_name": "Sample",
-            "last_name": "Lead",
-            "company": "Example Co",
-            "job_title": "Prospect",
-            "status": "new",
-            "raw_data": {"search_url": search_url, "location": "Remote", "source": "sales_navigator"},
-        }
-        lead = await upsert_lead(db, payload)
-        return {"created_or_updated": 1, "lead_id": str(lead.id)}
+        job = await enqueue_automation_job(
+            db,
+            user_id=user_id,
+            account_id=account_id,
+            job_type="SCRAPE_SALES_NAVIGATOR",
+            payload={"search_url": search_url, "limit": int(limit or 50)},
+        )
+        return {"status": "queued", "automation_job_id": str(job.id)}
 
     return asyncio.run(_with_db(run))
 
@@ -180,8 +178,33 @@ def run_campaign(campaign_id: str, user_id: str):
 @shared_task(name="workers.tasks.scheduled_tick")
 def scheduled_tick():
     async def run(db: AsyncSession):
+        total_scheduled = 0
+        res = await db.execute(select(Campaign).where(Campaign.status == "running"))
+        campaigns = list(res.scalars().all())
+        for c in campaigns:
+            account_ids_res = await db.execute(
+                select(LinkedInAccount.id).where(LinkedInAccount.user_id == c.user_id)
+            )
+            account_ids = [r[0] for r in account_ids_res.all()]
+            if not account_ids:
+                continue
+
+            enrolled_subq = (
+                select(SequenceEnrollment.lead_id).where(SequenceEnrollment.campaign_id == c.id).subquery()
+            )
+            leads_res = await db.execute(
+                select(Lead)
+                .where(Lead.account_id.in_(account_ids), ~Lead.id.in_(select(enrolled_subq.c.lead_id)))
+                .order_by(Lead.created_at.asc())
+                .limit(25)
+            )
+            leads = list(leads_res.scalars().all())
+            for l in leads:
+                enr = await enroll_lead_in_campaign(db, campaign_id=c.id, lead_id=l.id)
+                total_scheduled += await schedule_sequence_actions(db, enrollment=enr)
+
         dispatched = await dispatch_due_actions(db, limit=200)
-        return {"dispatched": dispatched}
+        return {"dispatched": dispatched, "actions_scheduled": total_scheduled}
 
     return asyncio.run(_with_db(run))
 

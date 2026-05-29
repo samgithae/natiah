@@ -1,14 +1,18 @@
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.db.session import get_db
 from app.schemas.lead import LeadCreate, LeadOut
-from app.services.campaigns import celery_client
+from app.services.account_service import get_linkedin_account
+from app.services.automation_jobs import enqueue_automation_job
+from app.services.campaigns import celery_client, create_campaign, start_campaign
 from app.services.leads import export_leads_csv, list_leads, upsert_lead
+from app.services.message_sequences import create_sequence
 
 
 router = APIRouter()
@@ -73,13 +77,111 @@ async def export_csv(account_id: uuid.UUID, db: AsyncSession = Depends(get_db), 
 async def scrape_sales_navigator(
     search_url: str,
     linkedin_account_id: str,
+    limit: int = Query(50, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    try:
+        account_uuid = uuid.UUID(str(linkedin_account_id))
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid linkedin_account_id")
+
+    a = await get_linkedin_account(db, user_id=user.id, account_id=account_uuid)
+    if not a:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+
     task = celery_client.send_task(
         "workers.tasks.scrape_sales_navigator",
-        args=[linkedin_account_id, user.id.hex, search_url],
+        args=[str(a.id), user.id.hex, search_url, int(limit)],
     )
     return {"task_id": task.id}
+
+
+class ExtractSearchIn(BaseModel):
+    account_id: uuid.UUID
+    search_url: str = Field(min_length=1, max_length=2000)
+    connect_note: str | None = Field(default=None, max_length=300)
+    message: str | None = Field(default=None, max_length=3000)
+    followups: list[str] = Field(default_factory=list)
+    lead_limit: int = Field(default=50, ge=1, le=500)
+    campaign_name: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+class ExtractSearchOut(BaseModel):
+    campaign_id: uuid.UUID
+    automation_job_id: uuid.UUID
+    status: str
+
+
+@router.post("/extract-search", response_model=ExtractSearchOut, status_code=status.HTTP_202_ACCEPTED)
+async def extract_search(
+    payload: ExtractSearchIn,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    a = await get_linkedin_account(db, user_id=user.id, account_id=payload.account_id)
+    if not a:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+
+    campaign = await create_campaign(
+        db,
+        user.id,
+        name=payload.campaign_name or "Search Extract",
+        daily_limit=50,
+    )
+
+    step_number = 1
+    await create_sequence(
+        db,
+        campaign_id=campaign.id,
+        step_number=step_number,
+        delay_days=0,
+        action_type="connect",
+        email_subject=None,
+        message_template=payload.connect_note or "",
+    )
+    step_number += 1
+
+    if payload.message and payload.message.strip():
+        await create_sequence(
+            db,
+            campaign_id=campaign.id,
+            step_number=step_number,
+            delay_days=2,
+            action_type="linkedin_message",
+            email_subject=None,
+            message_template=payload.message.strip(),
+        )
+        step_number += 1
+
+    delay = 4
+    for f in payload.followups:
+        txt = (f or "").strip()
+        if not txt:
+            continue
+        await create_sequence(
+            db,
+            campaign_id=campaign.id,
+            step_number=step_number,
+            delay_days=delay,
+            action_type="linkedin_message",
+            email_subject=None,
+            message_template=txt,
+        )
+        step_number += 1
+        delay += 2
+
+    job = await enqueue_automation_job(
+        db,
+        user_id=user.id,
+        account_id=a.id,
+        job_type="SCRAPE_SALES_NAVIGATOR",
+        payload={"search_url": payload.search_url, "limit": int(payload.lead_limit)},
+    )
+
+    await start_campaign(db, user.id, campaign.id)
+
+    return ExtractSearchOut(campaign_id=campaign.id, automation_job_id=job.id, status="started")
 
 
 @router.post("/email-finder")
