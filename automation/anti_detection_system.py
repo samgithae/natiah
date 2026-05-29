@@ -200,9 +200,19 @@ class AntiDetectionManager:
             return AllowResult(False, next_run_at=state.cooldown_until, reason="cooldown")
 
         stats = await self._get_or_create_today_stats(db, account_id, now.date())
-        max_connections = int(app_settings.max_connections_per_day) if app_settings else self.MAX_CONNECTIONS_PER_DAY
-        max_messages = int(app_settings.max_messages_per_day) if app_settings else self.MAX_MESSAGES_PER_DAY
-        max_visits = int(app_settings.max_profile_visits_per_day) if app_settings else self.MAX_PROFILE_VISITS_PER_DAY
+        raw_connections = int(app_settings.max_connections_per_day) if app_settings else self.MAX_CONNECTIONS_PER_DAY
+        raw_messages = int(app_settings.max_messages_per_day) if app_settings else self.MAX_MESSAGES_PER_DAY
+        raw_visits = int(app_settings.max_profile_visits_per_day) if app_settings else self.MAX_PROFILE_VISITS_PER_DAY
+
+        try:
+            safety = float(os.environ.get("NATIAH_SAFETY_FACTOR") or "0.5")
+        except Exception:
+            safety = 0.5
+        safety = min(1.0, max(0.1, safety))
+
+        max_connections = max(1, int(raw_connections * safety))
+        max_messages = max(1, int(raw_messages * safety))
+        max_visits = max(1, int(raw_visits * safety))
 
         if action == "CONNECT" and stats.connections_sent >= max_connections:
             if app_settings:

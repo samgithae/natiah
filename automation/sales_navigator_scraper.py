@@ -164,7 +164,7 @@ class SalesNavigatorScraper:
             await random_mouse_jitter(page)
 
             seen: set[str] = set()
-            scraped: list[ScrapedLead] = []
+            created_or_updated = 0
 
             for _ in range(max_pages):
                 await self._infinite_scroll(page, max_rounds=10)
@@ -177,50 +177,57 @@ class SalesNavigatorScraper:
                     if lead.linkedin_url in seen:
                         continue
                     seen.add(lead.linkedin_url)
-                    scraped.append(lead)
-                    if len(scraped) >= max_leads:
+
+                    stmt = (
+                        insert(Lead)
+                        .values(
+                            account_id=account_id,
+                            linkedin_url=lead.linkedin_url,
+                            first_name=lead.first_name,
+                            last_name=lead.last_name,
+                            company=lead.company,
+                            job_title=lead.job_title,
+                            status="new",
+                            raw_data={
+                                "location": lead.location,
+                                "source": "sales_navigator",
+                                "search_url": search_url,
+                            },
+                        )
+                        .on_conflict_do_update(
+                            constraint="uq_leads_account_linkedin",
+                            set_={
+                                "first_name": lead.first_name,
+                                "last_name": lead.last_name,
+                                "company": lead.company,
+                                "job_title": lead.job_title,
+                                "raw_data": {
+                                    "location": lead.location,
+                                    "source": "sales_navigator",
+                                    "search_url": search_url,
+                                },
+                            },
+                        )
+                        .returning(Lead.id)
+                    )
+                    res = await db.execute(stmt)
+                    if res.scalar_one_or_none():
+                        created_or_updated += 1
+                    if created_or_updated % 10 == 0:
+                        await db.commit()
+                    if random.random() < 0.12:
+                        human_delay(0.2, 0.8)
+
+                    if len(seen) >= max_leads:
                         break
-                if len(scraped) >= max_leads:
+                await db.commit()
+                if len(seen) >= max_leads:
                     break
                 moved = await self._click_next(page)
                 if not moved:
                     break
                 human_delay(1.0, 2.2)
 
-            created = 0
-            for s in scraped:
-                stmt = (
-                    insert(Lead)
-                    .values(
-                        account_id=account_id,
-                        linkedin_url=s.linkedin_url,
-                        first_name=s.first_name,
-                        last_name=s.last_name,
-                        company=s.company,
-                        job_title=s.job_title,
-                        status="new",
-                        raw_data={"location": s.location, "source": "sales_navigator", "search_url": search_url},
-                    )
-                    .on_conflict_do_update(
-                        constraint="uq_leads_account_linkedin",
-                        set_={
-                            "first_name": s.first_name,
-                            "last_name": s.last_name,
-                            "company": s.company,
-                            "job_title": s.job_title,
-                            "raw_data": {"location": s.location, "source": "sales_navigator", "search_url": search_url},
-                        },
-                    )
-                    .returning(Lead.id)
-                )
-                res = await db.execute(stmt)
-                if res.scalar_one_or_none():
-                    created += 1
-                if random.random() < 0.12:
-                    human_delay(0.2, 0.8)
-            await db.commit()
-
-            return {"scraped": len(scraped), "created_or_updated": created}
+            return {"scraped": len(seen), "created_or_updated": created_or_updated}
         finally:
             await page.close()
-
