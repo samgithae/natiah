@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.lead import Lead
 
 from automation.human import human_delay, random_mouse_jitter, random_scroll
+from automation.anti_detection_system import CaptchaDetectedError, detect_captcha
 
 
 LINKEDIN_BASE = "https://www.linkedin.com"
@@ -64,20 +65,45 @@ class SalesNavigatorScraper:
         self.context = context
 
     async def _goto(self, page: Page, url: str) -> None:
-        await _retry(lambda: page.goto(url, wait_until="domcontentloaded"), attempts=3)
+        await _retry(lambda: page.goto(url, wait_until="domcontentloaded", timeout=20_000), attempts=3)
+
+    async def _maybe_accept_cookies(self, page: Page) -> None:
+        selectors = [
+            "button:has-text('Accept')",
+            "button:has-text('Agree')",
+            "button[aria-label*='Accept']",
+        ]
+        for sel in selectors:
+            try:
+                btn = await page.query_selector(sel)
+            except Exception:
+                btn = None
+            if btn:
+                try:
+                    await btn.click()
+                    await page.wait_for_timeout(random.randint(400, 900))
+                    return
+                except Exception:
+                    continue
 
     async def _collect_cards(self, page: Page) -> list[dict]:
         js = """
         (root) => {
           const cards = [];
-          const rows = Array.from(document.querySelectorAll('li, div')).slice(0, 2000);
-          for (const el of rows) {
-            const a = el.querySelector && el.querySelector("a[href*='/in/'], a[href*='linkedin.com/in/']");
-            if (!a) continue;
+          const anchors = Array.from(document.querySelectorAll("a[href*='/in/'], a[href*='linkedin.com/in/']")).slice(0, 2000);
+          for (const a of anchors) {
             const href = a.getAttribute("href") || "";
-            const text = (el.innerText || "").trim();
-            if (!text) continue;
-            cards.push({ href, text });
+            if (!href || href.indexOf("/in/") === -1) continue;
+            let el = a;
+            for (let i = 0; i < 6; i++) {
+              if (!el || !el.parentElement) break;
+              el = el.parentElement;
+              const txt = (el.innerText || "").trim();
+              if (txt && txt.length >= 10) {
+                cards.push({ href, text: txt });
+                break;
+              }
+            }
           }
           return cards;
         }
@@ -161,6 +187,12 @@ class SalesNavigatorScraper:
         page = await self.context.new_page()
         try:
             await self._goto(page, search_url)
+            await self._maybe_accept_cookies(page)
+            if await detect_captcha(page):
+                raise CaptchaDetectedError("Captcha detected on search page")
+            url = (page.url or "").lower()
+            if "login" in url or "/checkpoint/" in url or "challenge" in url:
+                raise RuntimeError("LinkedIn is not accessible (login/checkpoint). Reconnect the account session.")
             await random_mouse_jitter(page)
 
             seen: set[str] = set()
@@ -169,6 +201,8 @@ class SalesNavigatorScraper:
             for _ in range(max_pages):
                 await self._infinite_scroll(page, max_rounds=10)
                 cards = await self._collect_cards(page)
+                if not cards and len(seen) == 0:
+                    raise RuntimeError("No profiles found on this page. Try a Sales Navigator search URL or verify the account can view search results.")
                 random.shuffle(cards)
                 for c in cards:
                     lead = self._parse_card(c)
