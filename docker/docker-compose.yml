@@ -23,7 +23,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://natiah:natiah@postgres:5432/natiah}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       JWT_SECRET: ${JWT_SECRET:-change-me}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       DB_AUTO_CREATE: ${DB_AUTO_CREATE:-true}
       LINKEDIN_CLIENT_ID: ${LINKEDIN_CLIENT_ID:-}
       LINKEDIN_CLIENT_SECRET: ${LINKEDIN_CLIENT_SECRET:-}
