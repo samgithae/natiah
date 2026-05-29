@@ -166,38 +166,42 @@ class AntiDetectionManager:
             res = await db.execute(select(AppSettings).where(AppSettings.user_id == acct.user_id))
             app_settings = res.scalar_one_or_none()
 
-        if app_settings:
-            start, end = working_window_utc_custom(
-                account_id,
-                day=now.date(),
-                start_min=int(app_settings.work_start_min_hour),
-                start_max=int(app_settings.work_start_max_hour),
-                end_min=int(app_settings.work_end_min_hour),
-                end_max=int(app_settings.work_end_max_hour),
-            )
-        else:
-            start, end = working_window_utc(account_id, now.date())
-        if now < start:
-            return AllowResult(False, next_run_at=start, reason="outside_working_hours")
-        if now > end:
+        state = await self._get_or_create_state(db, account_id)
+        if state.paused_until and state.paused_until > now:
+            return AllowResult(False, next_run_at=state.paused_until, reason="paused")
+        if state.cooldown_until and state.cooldown_until > now:
+            return AllowResult(False, next_run_at=state.cooldown_until, reason="cooldown")
+
+        if action != "SCRAPE_SALES_NAVIGATOR":
             if app_settings:
-                next_start, _ = working_window_utc_custom(
+                start, end = working_window_utc_custom(
                     account_id,
-                    day=now.date() + timedelta(days=1),
+                    day=now.date(),
                     start_min=int(app_settings.work_start_min_hour),
                     start_max=int(app_settings.work_start_max_hour),
                     end_min=int(app_settings.work_end_min_hour),
                     end_max=int(app_settings.work_end_max_hour),
                 )
             else:
-                next_start, _ = working_window_utc(account_id, now.date() + timedelta(days=1))
-            return AllowResult(False, next_run_at=next_start, reason="outside_working_hours")
+                start, end = working_window_utc(account_id, now.date())
+            if now < start:
+                return AllowResult(False, next_run_at=start, reason="outside_working_hours")
+            if now > end:
+                if app_settings:
+                    next_start, _ = working_window_utc_custom(
+                        account_id,
+                        day=now.date() + timedelta(days=1),
+                        start_min=int(app_settings.work_start_min_hour),
+                        start_max=int(app_settings.work_start_max_hour),
+                        end_min=int(app_settings.work_end_min_hour),
+                        end_max=int(app_settings.work_end_max_hour),
+                    )
+                else:
+                    next_start, _ = working_window_utc(account_id, now.date() + timedelta(days=1))
+                return AllowResult(False, next_run_at=next_start, reason="outside_working_hours")
 
-        state = await self._get_or_create_state(db, account_id)
-        if state.paused_until and state.paused_until > now:
-            return AllowResult(False, next_run_at=state.paused_until, reason="paused")
-        if state.cooldown_until and state.cooldown_until > now:
-            return AllowResult(False, next_run_at=state.cooldown_until, reason="cooldown")
+        if action == "SCRAPE_SALES_NAVIGATOR":
+            return AllowResult(True)
 
         stats = await self._get_or_create_today_stats(db, account_id, now.date())
         raw_connections = int(app_settings.max_connections_per_day) if app_settings else self.MAX_CONNECTIONS_PER_DAY
