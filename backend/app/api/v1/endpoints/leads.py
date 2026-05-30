@@ -15,6 +15,8 @@ from app.services.automation_jobs import enqueue_automation_job
 from app.services.campaigns import celery_client, create_campaign, start_campaign
 from app.services.leads import export_leads_csv, list_leads, upsert_lead
 from app.services.message_sequences import create_sequence
+from app.services.playwright_manager import close_persistent_context, launch_persistent_context
+from app.services.linkedin_session_service import open_and_verify
 
 
 router = APIRouter()
@@ -124,6 +126,30 @@ async def extract_search(
     a = await get_linkedin_account(db, user_id=user.id, account_id=payload.account_id)
     if not a:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    if not a.session_path:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing session profile path")
+
+    ctx = await launch_persistent_context(
+        user_data_dir=a.session_path,
+        headless=True,
+        slow_mo_ms=0,
+        args=[
+            "--disable-blink-features=AutomationControlled",
+            "--disable-dev-shm-usage",
+            "--no-sandbox",
+            "--disable-infobars",
+            "--disable-notifications",
+        ],
+    )
+    try:
+        chk = await open_and_verify(ctx.context, ctx.page)
+        if chk.status != "connected":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="LinkedIn session not connected. Go to Accounts → Connect for Automation and paste your li_at cookie, then verify and retry.",
+            )
+    finally:
+        await close_persistent_context(ctx.context)
 
     campaign = await create_campaign(
         db,
