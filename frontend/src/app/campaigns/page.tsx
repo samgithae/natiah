@@ -82,6 +82,19 @@ export default function CampaignsPage() {
     }
   }
 
+  async function onDelete(id: string) {
+    setError(null);
+    try {
+      await apiFetch(`/campaigns/${id}`, { method: "DELETE" });
+      toast.success("Campaign deleted");
+      await refresh();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed";
+      setError(msg);
+      toast.error("Failed to delete", msg);
+    }
+  }
+
   const filtered = campaigns.filter((c) => {
     const q = search.trim().toLowerCase();
     if (!q) return true;
@@ -145,13 +158,18 @@ export default function CampaignsPage() {
                         <td className="py-3">{c.status}</td>
                         <td className="py-3">{c.daily_limit}</td>
                         <td className="py-3 text-right">
-                          {c.status !== "running" ? (
-                            <Button onClick={() => start(c.id)}>Start</Button>
-                          ) : (
-                            <Button variant="secondary" onClick={() => stop(c.id)}>
-                              Stop
+                          <div className="flex justify-end gap-2">
+                            {c.status !== "running" ? (
+                              <Button onClick={() => start(c.id)}>Start</Button>
+                            ) : (
+                              <Button variant="secondary" onClick={() => stop(c.id)}>
+                                Stop
+                              </Button>
+                            )}
+                            <Button variant="secondary" onClick={() => onDelete(c.id)}>
+                              Delete
                             </Button>
-                          )}
+                          </div>
                         </td>
                       </tr>
                     ))}
