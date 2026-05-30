@@ -67,11 +67,11 @@ async def has_linkedin_session_cookie(context: BrowserContext) -> bool:
 async def check_authenticated(page: Page, context: BrowserContext) -> SessionCheckResult:
     if await detect_captcha(page):
         return SessionCheckResult(status="captcha")
+    url = (page.url or "").lower()
+    if "linkedin.com/login" in url or "/uas/login" in url or "/checkpoint/" in url:
+        return SessionCheckResult(status="expired")
     if await has_linkedin_session_cookie(context):
         return SessionCheckResult(status="connected")
-    url = (page.url or "").lower()
-    if "linkedin.com/login" in url:
-        return SessionCheckResult(status="expired")
     return SessionCheckResult(status="expired")
 
 
