@@ -17,11 +17,13 @@ function ConnectLinkedInInner() {
   const [liAt, setLiAt] = useState("");
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [detail, setDetail] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function submit() {
     setError(null);
     setStatus(null);
+    setDetail(null);
     setLoading(true);
     try {
       const res = await apiFetch<{ status: string; detail?: string | null }>("/accounts/connect/complete", {
@@ -29,6 +31,7 @@ function ConnectLinkedInInner() {
         body: JSON.stringify({ token, li_at: liAt }),
       });
       setStatus(res.status);
+      setDetail(res.detail || null);
       if (res.status === "connected") toast.success("LinkedIn connected");
       else toast.error("Not connected", res.status);
     } catch (e) {
@@ -63,6 +66,7 @@ function ConnectLinkedInInner() {
 
           {error ? <div className="mt-4 text-sm text-red-600">{error}</div> : null}
           {status ? <div className="mt-4 text-sm">Status: {status}</div> : null}
+          {detail ? <div className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">Detail: {detail}</div> : null}
 
           <div className="mt-6 flex items-center justify-end">
             <Button disabled={loading || !token || liAt.trim().length < 10} onClick={submit}>

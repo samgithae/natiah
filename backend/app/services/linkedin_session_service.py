@@ -66,13 +66,15 @@ async def has_linkedin_session_cookie(context: BrowserContext) -> bool:
 
 async def check_authenticated(page: Page, context: BrowserContext) -> SessionCheckResult:
     if await detect_captcha(page):
-        return SessionCheckResult(status="captcha")
+        return SessionCheckResult(status="captcha", detail="captcha_detected")
     url = (page.url or "").lower()
-    if "linkedin.com/login" in url or "/uas/login" in url or "/checkpoint/" in url:
-        return SessionCheckResult(status="expired")
+    if "/checkpoint/" in url or "challenge" in url:
+        return SessionCheckResult(status="captcha", detail="checkpoint")
+    if "linkedin.com/login" in url or "/uas/login" in url:
+        return SessionCheckResult(status="expired", detail="login_redirect")
     if await has_linkedin_session_cookie(context):
         return SessionCheckResult(status="connected")
-    return SessionCheckResult(status="expired")
+    return SessionCheckResult(status="expired", detail="missing_cookie")
 
 
 async def open_and_verify(context: BrowserContext, page: Page) -> SessionCheckResult:
@@ -135,12 +137,22 @@ async def connect_with_li_at_cookie(
             {
                 "name": "li_at",
                 "value": v,
+                "url": "https://www.linkedin.com",
+                "httpOnly": True,
+                "secure": True,
+                "sameSite": "None",
+            },
+            {
+                "name": "li_at",
+                "value": v,
                 "domain": ".linkedin.com",
                 "path": "/",
                 "httpOnly": True,
                 "secure": True,
-                "sameSite": "Lax",
-            }
+                "sameSite": "None",
+            },
         ]
     )
+    if not await has_linkedin_session_cookie(context):
+        return SessionCheckResult(status="expired", detail="cookie_rejected")
     return await open_and_verify(context, page)

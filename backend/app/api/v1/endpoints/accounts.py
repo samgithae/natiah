@@ -496,7 +496,7 @@ async def verify_linkedin(
         chk = await open_and_verify(ctx.context, ctx.page)
         a.status = chk.status
         await db.commit()
-        return {"status": a.status}
+        return {"status": a.status, "detail": chk.detail}
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
     finally:
