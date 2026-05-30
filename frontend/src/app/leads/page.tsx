@@ -54,6 +54,7 @@ export default function LeadsPage() {
   const [mode, setMode] = useState<LeadMode>("single");
   const [linkedinUrl, setLinkedinUrl] = useState("");
   const [searchUrl, setSearchUrl] = useState("");
+  const [campaignName, setCampaignName] = useState("");
   const [connectNote, setConnectNote] = useState("");
   const [message, setMessage] = useState("");
   const [followups, setFollowups] = useState("");
@@ -173,6 +174,7 @@ export default function LeadsPage() {
           body: JSON.stringify({
             account_id: accountId,
             search_url: url,
+            campaign_name: campaignName.trim() || null,
             connect_note: connectNote.trim() || null,
             message: message.trim() || null,
             followups: followupList,
@@ -184,6 +186,7 @@ export default function LeadsPage() {
       toast.success("Extraction started", "Leads will appear as they’re found");
       setActiveExtractionJobId(res.automation_job_id);
       setSearchUrl("");
+      setCampaignName("");
       setConnectNote("");
       setMessage("");
       setFollowups("");
@@ -342,6 +345,12 @@ export default function LeadsPage() {
               </div>
               ) : (
                 <>
+                  <div>
+                    <div className="text-sm font-medium">Search name</div>
+                    <div className="mt-1">
+                      <Input value={campaignName} onChange={setCampaignName} placeholder="HR in Kenya" />
+                    </div>
+                  </div>
                   <div>
                     <div className="text-sm font-medium">LinkedIn Search URL</div>
                     <div className="mt-1">
